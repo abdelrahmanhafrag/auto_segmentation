@@ -16,18 +16,6 @@ from typing import Dict, List, Tuple, Optional
 import base64
 from io import BytesIO
 
-import requests
-import numpy as np
-import pydicom
-import json
-import time
-from pathlib import Path
-import nibabel as nib
-from scipy import ndimage
-from typing import Dict, List, Tuple, Optional
-import base64
-from io import BytesIO
-
 class DICOMAutoSegmenter:
     def __init__(self, nninteractive_url: str = "http://localhost:1527"):
         """
@@ -38,6 +26,33 @@ class DICOMAutoSegmenter:
         """
         self.server_url = nninteractive_url
         self.session_id = None
+        
+        # Test server connection on initialization
+        self.test_server_connection()
+    
+    def test_server_connection(self) -> bool:
+        """
+        Test if nnInteractive server is responding
+        """
+        try:
+            print(f"🔗 Testing connection to {self.server_url}")
+            
+            # Try a simple GET request first
+            response = requests.get(f"{self.server_url}/", timeout=10)
+            print(f"📡 Server root response: {response.status_code}")
+            
+            # Try health check or docs endpoint
+            try:
+                health_response = requests.get(f"{self.server_url}/docs", timeout=10)
+                print(f"📡 Docs endpoint: {health_response.status_code}")
+            except:
+                print("📡 No /docs endpoint available")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Server connection failed: {e}")
+            return False
         
     def load_dicom(self, dicom_path: str) -> np.ndarray:
         """
@@ -75,6 +90,30 @@ class DICOMAutoSegmenter:
             print(f"Error loading DICOM: {e}")
             return None
     
+    def normalize_image(self, image: np.ndarray) -> np.ndarray:
+        """
+        Test if nnInteractive server is responding
+        """
+        try:
+            print(f"🔗 Testing connection to {self.server_url}")
+            
+            # Try a simple GET request first
+            response = requests.get(f"{self.server_url}/", timeout=10)
+            print(f"📡 Server root response: {response.status_code}")
+            
+            # Try health check or docs endpoint
+            try:
+                health_response = requests.get(f"{self.server_url}/docs", timeout=10)
+                print(f"📡 Docs endpoint: {health_response.status_code}")
+            except:
+                print("📡 No /docs endpoint available")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Server connection failed: {e}")
+            return False
+
     def normalize_image(self, image: np.ndarray) -> np.ndarray:
         """
         Optional light preprocessing - only if nnInteractive server needs it
@@ -147,57 +186,75 @@ class DICOMAutoSegmenter:
             Success status (nnInteractive appears to be stateless)
         """
         try:
-            # Save image as temporary file - nnInteractive likely expects file upload
+            print(f"📊 Image info: shape={image.shape}, dtype={image.dtype}, min={image.min()}, max={image.max()}")
+            
+            # Try different upload methods to avoid server errors
+            
+            # Method 1: Try uploading as .nii file (medical standard)
             import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_file:
-                np.save(tmp_file.name, image)
+            import nibabel as nib
+            
+            with tempfile.NamedTemporaryFile(suffix='.nii.gz', delete=False) as tmp_file:
+                # Save as NIfTI format (standard for medical images)
+                nii_img = nib.Nifti1Image(image.astype(np.int16), np.eye(4))
+                nib.save(nii_img, tmp_file.name)
                 
-                # Upload using the correct endpoint
+                print(f"💾 Saved temp file: {tmp_file.name}")
+                
+                # Upload the NIfTI file
                 with open(tmp_file.name, 'rb') as f:
-                    files = {'file': f}
+                    files = {'file': (f'medical_image.nii.gz', f, 'application/octet-stream')}
+                    
+                    print("⬆️ Uploading NIfTI file...")
                     response = requests.post(
                         f"{self.server_url}/upload_image",
                         files=files,
-                        timeout=60
+                        timeout=120  # Longer timeout
                     )
+            
+            print(f"📡 Upload response: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
+                print(f"✅ Upload successful: {result}")
                 
                 if result.get("status") == "ok":
-                    print(f"✅ Image uploaded successfully. Server ready for interactions.")
-                    return "ready"  # Return success indicator
+                    return "ready"
                 else:
                     print(f"⚠️ Unexpected response: {result}")
                     return "ready"  # Proceed anyway
                     
             else:
-                print(f"Failed to upload image: {response.status_code} - {response.text}")
+                print(f"❌ Upload failed: {response.status_code}")
+                print(f"Error details: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"Error uploading image: {e}")
+            print(f"❌ Upload error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def send_point_prompt(self, x: int, y: int, z: int, is_positive: bool = True) -> Dict:
         """
         Send point prompt using correct nnInteractive format
+        voxel_coord should be a single coordinate [x, y, z], not multiple points
         
         Args:
-            x, y, z: Coordinates of the point
+            x, y, z: Single point coordinates
             is_positive: Whether this is a positive or negative prompt
             
         Returns:
             Segmentation result
         """
         try:
-            # Use the correct format that nnInteractive expects
+            # Single point coordinate - not an array of points
             prompt_data = {
-                "voxel_coord": [x, y, z],  # Array format
-                "positive_click": is_positive  # Boolean field name
+                "voxel_coord": [int(x), int(y), int(z)],  # Single [x,y,z] coordinate
+                "positive_click": bool(is_positive)
             }
             
-            print(f"🎯 Sending point prompt: {prompt_data}")
+            print(f"🎯 Sending single point: {prompt_data}")
             
             response = requests.post(
                 f"{self.server_url}/add_point_interaction",
@@ -205,19 +262,20 @@ class DICOMAutoSegmenter:
                 timeout=60
             )
             
-            print(f"🐛 Point response status: {response.status_code}")
+            print(f"🐛 Response status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
-                print(f"🐛 Point response: {result}")
-                print(f"✅ Point prompt successful at ({x}, {y}, {z})")
+                print(f"🐛 Response content: {result}")
+                print(f"✅ Point prompt successful")
                 return result
             else:
-                print(f"Point prompt failed: {response.status_code} - {response.text}")
+                print(f"❌ Point prompt failed: {response.status_code}")
+                print(f"Error details: {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"Error sending point prompt: {e}")
+            print(f"❌ Error sending point prompt: {e}")
             return None
     
     def send_bounding_box_prompt(self, min_coords: Tuple[int, int, int], 
@@ -420,7 +478,6 @@ class DICOMAutoSegmenter:
             "regions_processed": len(regions_to_process),
             "segmentations": all_segmentations,
             "metadata": {
-                "session_id": session_id,
                 "image_shape": list(image.shape)
             }
         }
