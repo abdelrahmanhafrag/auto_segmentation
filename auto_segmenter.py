@@ -129,28 +129,33 @@ class DICOMAutoSegmenter:
     
     def upload_image_to_server(self, image: np.ndarray) -> str:
         """
-        Upload image to nnInteractive server - keep it simple
+        Upload image to nnInteractive server using correct endpoint
         
         Returns:
             Session ID for further communication
         """
         try:
-            # Send image data as-is, let server handle format
-            # In reality, might need to save as temp file and upload that
-            files = {'file': ('image.npy', image.tobytes())}
-            
-            response = requests.post(
-                f"{self.server_url}/upload",
-                files=files,
-                timeout=30
-            )
+            # Save image as temporary file - nnInteractive likely expects file upload
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as tmp_file:
+                np.save(tmp_file.name, image)
+                
+                # Upload using the correct endpoint
+                with open(tmp_file.name, 'rb') as f:
+                    files = {'file': f}
+                    response = requests.post(
+                        f"{self.server_url}/upload_image",
+                        files=files,
+                        timeout=60
+                    )
             
             if response.status_code == 200:
                 result = response.json()
-                self.session_id = result.get("session_id")
+                self.session_id = result.get("session_id") or result.get("image_id")
+                print(f"✅ Image uploaded successfully. Session ID: {self.session_id}")
                 return self.session_id
             else:
-                print(f"Failed to upload image: {response.status_code}")
+                print(f"Failed to upload image: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
@@ -159,7 +164,7 @@ class DICOMAutoSegmenter:
     
     def send_point_prompt(self, x: int, y: int, z: int, is_positive: bool = True) -> Dict:
         """
-        Send point prompt to nnInteractive server
+        Send point prompt using correct nnInteractive endpoint
         
         Args:
             x, y, z: Coordinates of the point
@@ -169,57 +174,89 @@ class DICOMAutoSegmenter:
             Segmentation result
         """
         try:
+            # Use the correct endpoint for point interactions
             prompt_data = {
                 "session_id": self.session_id,
-                "prompt_type": "point",
-                "coordinates": [x, y, z],
-                "is_positive": is_positive,
-                "slice_index": z
+                "x": x,
+                "y": y, 
+                "z": z,
+                "is_positive": is_positive
             }
             
             response = requests.post(
-                f"{self.server_url}/segment",
+                f"{self.server_url}/add_point_interaction",
                 json=prompt_data,
                 timeout=60
             )
             
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                print(f"✅ Point prompt successful at ({x}, {y}, {z})")
+                return result
             else:
-                print(f"Segmentation failed: {response.status_code}")
+                print(f"Point prompt failed: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
-            print(f"Error sending prompt: {e}")
+            print(f"Error sending point prompt: {e}")
             return None
     
     def send_bounding_box_prompt(self, min_coords: Tuple[int, int, int], 
                                 max_coords: Tuple[int, int, int]) -> Dict:
         """
-        Send bounding box prompt to nnInteractive server
+        Send bounding box prompt using correct nnInteractive endpoint
         """
         try:
             prompt_data = {
                 "session_id": self.session_id,
-                "prompt_type": "bounding_box",
-                "min_coordinates": list(min_coords),
-                "max_coordinates": list(max_coords)
+                "x_min": min_coords[0],
+                "y_min": min_coords[1],
+                "z_min": min_coords[2],
+                "x_max": max_coords[0],
+                "y_max": max_coords[1],
+                "z_max": max_coords[2]
             }
             
             response = requests.post(
-                f"{self.server_url}/segment",
+                f"{self.server_url}/add_bbox_interaction",
                 json=prompt_data,
                 timeout=60
             )
             
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                print(f"✅ Bounding box prompt successful")
+                return result
             else:
-                print(f"Bounding box segmentation failed: {response.status_code}")
+                print(f"Bounding box prompt failed: {response.status_code} - {response.text}")
                 return None
                 
         except Exception as e:
             print(f"Error sending bounding box: {e}")
+            return None
+    
+    def create_new_segment(self) -> str:
+        """
+        Create a new segment for segmentation
+        """
+        try:
+            response = requests.post(
+                f"{self.server_url}/upload_segment",
+                json={"session_id": self.session_id},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                segment_id = result.get("segment_id") or result.get("id")
+                print(f"✅ New segment created: {segment_id}")
+                return segment_id
+            else:
+                print(f"Failed to create segment: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            print(f"Error creating segment: {e}")
             return None
     
     def validate_segmentation(self, segmentation: np.ndarray) -> Dict:
@@ -312,7 +349,13 @@ class DICOMAutoSegmenter:
         if not session_id:
             return {"error": "Failed to upload image to server"}
         
-        # Step 5: Segment each bright region
+        # Step 5: Create a new segment
+        print("🆕 Creating new segment...")
+        segment_id = self.create_new_segment()
+        if not segment_id:
+            print("⚠️ Warning: Could not create new segment, proceeding anyway...")
+        
+        # Step 6: Segment each bright region
         all_segmentations = []
         
         for i, (x, y, z) in enumerate(regions_to_process):
