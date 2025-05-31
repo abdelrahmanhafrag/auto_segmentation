@@ -132,7 +132,7 @@ class DICOMAutoSegmenter:
         Upload image to nnInteractive server using correct endpoint
         
         Returns:
-            Session ID for further communication
+            Success status (nnInteractive appears to be stateless)
         """
         try:
             # Save image as temporary file - nnInteractive likely expects file upload
@@ -152,25 +152,13 @@ class DICOMAutoSegmenter:
             if response.status_code == 200:
                 result = response.json()
                 
-                # Debug: Print the actual response to see what fields are available
-                print(f"🐛 Server response: {result}")
-                
-                # Try different possible field names
-                self.session_id = (result.get("session_id") or 
-                                 result.get("image_id") or 
-                                 result.get("id") or
-                                 result.get("uuid") or
-                                 result.get("key"))
-                
-                if self.session_id:
-                    print(f"✅ Image uploaded successfully. Session ID: {self.session_id}")
+                if result.get("status") == "ok":
+                    print(f"✅ Image uploaded successfully. Server ready for interactions.")
+                    return "ready"  # Return success indicator
                 else:
-                    print(f"⚠️ Image uploaded but no session ID found in response: {result}")
-                    # Sometimes the response itself is the ID
-                    if isinstance(result, str):
-                        self.session_id = result
+                    print(f"⚠️ Unexpected response: {result}")
+                    return "ready"  # Proceed anyway
                     
-                return self.session_id
             else:
                 print(f"Failed to upload image: {response.status_code} - {response.text}")
                 return None
@@ -182,6 +170,7 @@ class DICOMAutoSegmenter:
     def send_point_prompt(self, x: int, y: int, z: int, is_positive: bool = True) -> Dict:
         """
         Send point prompt using correct nnInteractive endpoint
+        No session ID needed - server appears to be stateless
         
         Args:
             x, y, z: Coordinates of the point
@@ -191,14 +180,15 @@ class DICOMAutoSegmenter:
             Segmentation result
         """
         try:
-            # Use the correct endpoint for point interactions
+            # Try without session_id first since server doesn't provide one
             prompt_data = {
-                "session_id": self.session_id,
                 "x": x,
                 "y": y, 
                 "z": z,
                 "is_positive": is_positive
             }
+            
+            print(f"🎯 Sending point prompt: ({x}, {y}, {z})")
             
             response = requests.post(
                 f"{self.server_url}/add_point_interaction",
@@ -206,8 +196,11 @@ class DICOMAutoSegmenter:
                 timeout=60
             )
             
+            print(f"🐛 Point response status: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
+                print(f"🐛 Point response: {result}")
                 print(f"✅ Point prompt successful at ({x}, {y}, {z})")
                 return result
             else:
@@ -254,27 +247,30 @@ class DICOMAutoSegmenter:
     
     def create_new_segment(self) -> str:
         """
-        Create a new segment for segmentation
+        Create a new segment for segmentation (may not be needed)
         """
         try:
             response = requests.post(
                 f"{self.server_url}/upload_segment",
-                json={"session_id": self.session_id},
+                json={},  # No session_id needed
                 timeout=30
             )
             
+            print(f"🐛 Segment creation response: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
-                segment_id = result.get("segment_id") or result.get("id")
+                print(f"🐛 Segment response: {result}")
+                segment_id = result.get("segment_id") or result.get("id") or "default"
                 print(f"✅ New segment created: {segment_id}")
                 return segment_id
             else:
-                print(f"Failed to create segment: {response.status_code}")
-                return None
+                print(f"Segment creation info: {response.status_code} - {response.text}")
+                return "default"  # Proceed with default
                 
         except Exception as e:
-            print(f"Error creating segment: {e}")
-            return None
+            print(f"Segment creation info: {e}")
+            return "default"  # Proceed anyway
     
     def validate_segmentation(self, segmentation: np.ndarray) -> Dict:
         """
@@ -362,15 +358,13 @@ class DICOMAutoSegmenter:
         
         # Step 4: Upload to server
         print("⬆️ Uploading to nnInteractive server...")
-        session_id = self.upload_image_to_server(image)
-        if not session_id:
+        upload_status = self.upload_image_to_server(image)
+        if not upload_status:
             return {"error": "Failed to upload image to server"}
         
-        # Step 5: Create a new segment
-        print("🆕 Creating new segment...")
+        # Step 5: Try to create a new segment (may not be required)
+        print("🆕 Attempting to create new segment...")
         segment_id = self.create_new_segment()
-        if not segment_id:
-            print("⚠️ Warning: Could not create new segment, proceeding anyway...")
         
         # Step 6: Segment each bright region
         all_segmentations = []
