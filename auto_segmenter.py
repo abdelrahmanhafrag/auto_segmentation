@@ -151,8 +151,25 @@ class DICOMAutoSegmenter:
             
             if response.status_code == 200:
                 result = response.json()
-                self.session_id = result.get("session_id") or result.get("image_id")
-                print(f"✅ Image uploaded successfully. Session ID: {self.session_id}")
+                
+                # Debug: Print the actual response to see what fields are available
+                print(f"🐛 Server response: {result}")
+                
+                # Try different possible field names
+                self.session_id = (result.get("session_id") or 
+                                 result.get("image_id") or 
+                                 result.get("id") or
+                                 result.get("uuid") or
+                                 result.get("key"))
+                
+                if self.session_id:
+                    print(f"✅ Image uploaded successfully. Session ID: {self.session_id}")
+                else:
+                    print(f"⚠️ Image uploaded but no session ID found in response: {result}")
+                    # Sometimes the response itself is the ID
+                    if isinstance(result, str):
+                        self.session_id = result
+                    
                 return self.session_id
             else:
                 print(f"Failed to upload image: {response.status_code} - {response.text}")
