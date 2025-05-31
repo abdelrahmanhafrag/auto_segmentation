@@ -16,6 +16,18 @@ from typing import Dict, List, Tuple, Optional
 import base64
 from io import BytesIO
 
+import requests
+import numpy as np
+import pydicom
+import json
+import time
+from pathlib import Path
+import nibabel as nib
+from scipy import ndimage
+from typing import Dict, List, Tuple, Optional
+import base64
+from io import BytesIO
+
 class DICOMAutoSegmenter:
     def __init__(self, nninteractive_url: str = "http://localhost:1527"):
         """
@@ -169,8 +181,7 @@ class DICOMAutoSegmenter:
     
     def send_point_prompt(self, x: int, y: int, z: int, is_positive: bool = True) -> Dict:
         """
-        Send point prompt using correct nnInteractive endpoint
-        No session ID needed - server appears to be stateless
+        Send point prompt using correct nnInteractive format
         
         Args:
             x, y, z: Coordinates of the point
@@ -180,15 +191,13 @@ class DICOMAutoSegmenter:
             Segmentation result
         """
         try:
-            # Try without session_id first since server doesn't provide one
+            # Use the correct format that nnInteractive expects
             prompt_data = {
-                "x": x,
-                "y": y, 
-                "z": z,
-                "is_positive": is_positive
+                "voxel_coord": [x, y, z],  # Array format
+                "positive_click": is_positive  # Boolean field name
             }
             
-            print(f"🎯 Sending point prompt: ({x}, {y}, {z})")
+            print(f"🎯 Sending point prompt: {prompt_data}")
             
             response = requests.post(
                 f"{self.server_url}/add_point_interaction",
@@ -214,18 +223,18 @@ class DICOMAutoSegmenter:
     def send_bounding_box_prompt(self, min_coords: Tuple[int, int, int], 
                                 max_coords: Tuple[int, int, int]) -> Dict:
         """
-        Send bounding box prompt using correct nnInteractive endpoint
+        Send bounding box prompt using correct nnInteractive format
         """
         try:
+            # Use the correct format that nnInteractive expects
+            # Note: there's a typo in your example ("outer_point_one" twice), assuming second should be "outer_point_two"
             prompt_data = {
-                "session_id": self.session_id,
-                "x_min": min_coords[0],
-                "y_min": min_coords[1],
-                "z_min": min_coords[2],
-                "x_max": max_coords[0],
-                "y_max": max_coords[1],
-                "z_max": max_coords[2]
+                "outer_point_one": [min_coords[0], min_coords[1], min_coords[2]],
+                "outer_point_two": [max_coords[0], max_coords[1], max_coords[2]],  # Fixed typo
+                "positive_click": True
             }
+            
+            print(f"🎯 Sending bounding box prompt: {prompt_data}")
             
             response = requests.post(
                 f"{self.server_url}/add_bbox_interaction",
@@ -233,8 +242,11 @@ class DICOMAutoSegmenter:
                 timeout=60
             )
             
+            print(f"🐛 Bbox response status: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
+                print(f"🐛 Bbox response: {result}")
                 print(f"✅ Bounding box prompt successful")
                 return result
             else:
