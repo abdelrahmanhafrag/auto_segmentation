@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pet-segmentation"
+description = "Automated PET imaging segmentation using nnInteractive for scalable medical image analysis"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+    {name = "PET Segmentation Team", email = "contact@pet-segmentation.ai"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research", 
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy>=1.21.0",
+    "scipy>=1.7.0", 
+    "requests>=2.25.0",
+    "pydicom>=2.3.0",
+    "nibabel>=3.2.0",
+    "scikit-image>=0.18.0",
+    "pydantic>=1.8.0",
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=0.19.0",
+    "structlog>=21.1.0",
+    "tqdm>=4.62.0",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+]
+dev = [
+    "pytest>=6.2.0",
+    "pytest-cov>=2.12.0",
+    "pytest-asyncio>=0.15.0",
+    "black>=21.0.0",
+    "flake8>=3.9.0",
+    "mypy>=0.910",
+]
+full = [
+    "opencv-python>=4.5.0",
+    "pillow>=8.3.0",
+    "sqlalchemy>=1.4.0",
+    "alembic>=1.7.0",
+    "redis>=3.5.0",
+]
+
+[project.scripts]
+pet-segment = "pet_segmentation.cli.main:main"
+pet-segment-batch = "pet_segmentation.cli.batch:main"
+pet-segment-server = "pet_segmentation.api.server:main"
+
+[project.urls]
+Homepage = "https://github.com/your-org/pet-segmentation"
+Documentation = "https://pet-segmentation.readthedocs.io"
+Repository = "https://github.com/your-org/pet-segmentation.git"
+"Bug Tracker" = "https://github.com/your-org/pet-segmentation/issues"
+
+[tool.setuptools_scm]
+write_to = "pet_segmentation/_version.py"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+] 
